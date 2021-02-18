@@ -15,8 +15,13 @@ class AbstractGame {
         const canvas = document.querySelector(canvasSelector)! as HTMLCanvasElement;
         this._resizeObserver = new ResizeObserver(entries => {
             for (const entry of entries) {
-                this._ctx.canvas.width = entry.borderBoxSize[0].inlineSize;
-                this._ctx.canvas.height = entry.borderBoxSize[0].blockSize;
+                if (entry.borderBoxSize !== undefined) {
+                    this._ctx.canvas.width = entry.borderBoxSize[0].inlineSize;
+                    this._ctx.canvas.height = entry.borderBoxSize[0].blockSize;
+                } else {
+                    this._ctx.canvas.width = entry.contentRect.width;
+                    this._ctx.canvas.height = entry.contentRect.height;
+                }
             }
             this.invalidate();
         });
