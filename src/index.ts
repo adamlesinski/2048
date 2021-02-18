@@ -53,16 +53,21 @@ class AbstractGame {
     protected handleInput(event: KeyboardEvent) {}
 }
 
+function newArray<T>(size: number, init: () => T): T[] {
+    const array = new Array(size);
+    for (let i = 0; i < array.length; i += 1) {
+        array[i] = init();
+    }
+    return array;
+}
+
 class Grid<T> {
     rawData: T[];
     readonly size: number;
 
     constructor(size: number, init: () => T) {
         this.size = size;
-        this.rawData = new Array(size * size);
-        for (let i = 0; i < this.rawData.length; i += 1) {
-            this.rawData[i] = init();
-        }
+        this.rawData = newArray(size * size, init);
     }
 
     get(x: number, y: number): T {
@@ -154,34 +159,29 @@ const animations = {
     'slideAndMultiply': (tile: Tile, t: number) => {
         tile.translation = 1.0 - easeOutBack(t);
         if (t >= 0.5) {
-            tile.animatingValue = null;
+            tile.overlayValue = null;
         }
     },
-    'disappear': (tile: Tile, t: number) => {
-        if (t === 1.0) {
-            tile.animatingValue = null;
-            tile.translation = 0.0;
-        }
-    }
+    'disappear': (tile: Tile, t: number) => tile.visible = t === 1.0 ? false : true,
 };
 
 class Tile {
+    x: number = 0;
+    y: number = 0;
+    value: number = 0;
+    
+    // Animation
     animation: AnimationKind = 'none';
     animationStart: number = 0;
     animationDuration: number = 0;
 
+    // Animated properties
     translateX: number = 0;
     translateY: number = 0;
     translation: number = 0.0;
     scale: number = 1.0;
-
-    value: number;
-    animatingValue: number | null;
-
-    constructor(value: number) {
-        this.value = value;
-        this.animatingValue = null;
-    }
+    visible: boolean = true;
+    overlayValue: number | null = null;
 
     cancelPreviousAnimation() {
         if (this.animation === 'none') {
@@ -219,7 +219,7 @@ class Tile {
             case 'right': this.translateX = -amount; break;
             case 'down': this.translateY = -amount; break;
         }
-        this.animatingValue = value;
+        this.overlayValue = value;
     }
 
     animatePulse(now: number) {
@@ -230,28 +230,20 @@ class Tile {
         this.scale = 0.0;
     }
 
-    animateDisappear(now: number, direction: Direction, amount: number, value: number) {
+    animateDisappear(now: number) {
         this.cancelPreviousAnimation();
         this.animation = 'disappear';
         this.animationStart = now;
         this.animationDuration = 300 * DEBUG_ANIMATION_MULTIPLIER;
-        this.translateX = this.translateY = 0;
-        this.translation = 1.0;
-        switch (direction) {
-            case 'left': this.translateX = amount; break;
-            case 'up': this.translateY = amount; break;
-            case 'right': this.translateX = -amount; break;
-            case 'down': this.translateY = -amount; break;
-        }
-        this.animatingValue = value;
+        this.visible = true;
     }
 }
 
 const transforms = {
-    'left': (grid: Grid<any>) => grid.transpose().reverseColumns(),
-    'up': (grid: Grid<any>) => grid.reverseRows().reverseColumns(),
-    'right': (grid: Grid<any>) => grid.transpose().reverseRows(),
-    'down': (grid: Grid<any>) => {},
+    'left': (grid: Grid<any>) => grid.transpose().reverseRows(),
+    'up': (grid: Grid<any>) => {},
+    'right': (grid: Grid<any>) => grid.transpose().reverseColumns(),
+    'down': (grid: Grid<any>) => grid.reverseRows().reverseColumns(),
 };
 
 const inverseTransforms = {
@@ -262,61 +254,66 @@ const inverseTransforms = {
 };
 
 class Game extends AbstractGame {
-    private _grid: Grid<Tile>;
+    private _grid: Grid<number>;
     private _gameOver: boolean = false;
 
     constructor(canvasSelector: string, gridSize: number) {
         super(canvasSelector);
-        this._grid = new Grid(gridSize, () => new Tile(0));
+        this._grid = new Grid(gridSize, () => 0);
+
         this.dropTile(2);
         this.dropTile(2);
     }
 
     move(direction: Direction) {
-        const now = performance.now();
+        const grid = this._grid;
         let moves = false;
-        transforms[direction](this._grid);
-        for (let x = 0; x < this._grid.size; x += 1) {
-            let lastTileY = this._grid.size - 1;
-            let currentTileY = lastTileY - 1;
-            while (currentTileY >= 0 && lastTileY >= 0) {
-                const currentTile = this._grid.get(x, currentTileY);
-                const lastTile = this._grid.get(x, lastTileY);
-                if (currentTile.value > 0) {
-                    if (lastTile.value === 0) {
+
+        // Rotate the grid so that we are always performing the
+        // move upwards.
+        transforms[direction](grid);
+        for (let x = 0; x < grid.size; x += 1) {
+            let lastTileY = 0;
+            let currentTileY = lastTileY + 1;
+            while (currentTileY < grid.size) {
+                const currentTile = grid.get(x, currentTileY);
+                const lastTile = grid.get(x, lastTileY);
+                if (currentTile > 0) {
+                    if (lastTile === 0) {
                         // Slide into empty
-                        lastTile.value = currentTile.value;
-                        currentTile.value = 0;
-                        lastTile.animateSlide(now, direction, lastTileY - currentTileY);
-                        currentTileY -= 1;
+                        grid.set(x, lastTileY, currentTile);
+                        grid.set(x, currentTileY, 0);
+
+                        currentTileY += 1;
                         moves = true;
-                    } else if (lastTile.value === currentTile.value) {
+                    } else if (lastTile === currentTile) {
                         // Multiply
-                        lastTile.value = lastTile.value * 2;
-                        lastTile.animateSlideAndMultiply(now, direction, lastTileY - currentTileY, currentTile.value);
-                        currentTile.animateDisappear(now, direction, currentTileY - lastTileY, currentTile.value);
-                        currentTile.value = 0;
-                        currentTileY -= 1;
-                        lastTileY -= 1;
+                        grid.set(x, lastTileY, lastTile * 2);
+                        grid.set(x, currentTileY, 0);
+                        
+                        currentTileY += 1;
+                        lastTileY += 1;
                         moves = true;
                     } else {
                         // Immoveable
-                        lastTileY -= 1;
+                        lastTileY += 1;
                         if (lastTileY === currentTileY) {
-                            currentTileY -= 1;
+                            currentTileY += 1;
                         }
                     }
                 } else {
                     // Empty
-                    currentTileY -= 1;
+                    currentTileY += 1;
                 }
             }
         }
-        inverseTransforms[direction](this._grid);
+
+        // Rotate the grid back to its original orientation.
+        inverseTransforms[direction](grid);
 
         if (moves) {
             this.dropTile(2);
-        } else if (!this._grid.contains(tile => tile.value === 0)) {
+        } else if (!grid.contains(tile => tile === 0)) {
             this._gameOver = true;
         }
         this.invalidate();
@@ -328,34 +325,13 @@ class Game extends AbstractGame {
         const start = randomInt(0, rawData.length);
         for (let i = 0; i < rawData.length; i += 1) {
             const idx = (i + start) % rawData.length;
-            if (rawData[idx].value === 0) {
-                rawData[idx].value = value;
-                rawData[idx].animatePulse(performance.now());
+            if (rawData[idx] === 0) {
+                rawData[idx] = value;
                 this.invalidate();
                 return true;
             }
         }
         return false;
-    }
-
-    tick(time: number) {
-        let requestFrame = false;
-        for (const tile of this._grid.rawData) {
-            if (tile.animation === 'none') {
-                continue;
-            }
-            const elapsed = time - tile.animationStart;
-            const progress = Math.max(0.0, Math.min(1.0, elapsed / tile.animationDuration));
-            animations[tile.animation](tile, progress);
-            if (progress === 1.0) {
-                tile.animation = 'none';
-            } else {
-                requestFrame = true;
-            }
-        }
-        if (requestFrame) {
-            this.invalidate();
-        }
     }
 
     render(ctx: CanvasRenderingContext2D) {
@@ -372,29 +348,41 @@ class Game extends AbstractGame {
         ctx.textBaseline = 'middle';
         for (let y = 0; y < this._grid.size; y += 1) {
             for (let x = 0; x < this._grid.size; x += 1) {
-                const tile = this._grid.get(x, y);
-                if (tile.value > 0 || tile.animatingValue) {
+                const value = this._grid.get(x, y);
+                if (value > 0) {
                     ctx.save();
                     ctx.fillStyle = 'red';
                     ctx.beginPath();
                     ctx.translate((x * tileSize) + halfTile, (y * tileSize) + halfTile);
-                    ctx.translate(tile.translation * (tile.translateX * tileSize), tile.translation * (tile.translateY * tileSize));
-                    ctx.scale(tile.scale, tile.scale);
                     ctx.rect(-halfTile, -halfTile, tileSize, tileSize);
                     ctx.fill();
                     ctx.stroke();
                     ctx.beginPath();
                     ctx.fillStyle = 'black';
-                    if (tile.animatingValue !== null) {
-                        ctx.fillText(tile.animatingValue.toString(), 0, 0, tileSize);
-                    } else {
-                        ctx.fillText(tile.value.toString(), 0, 0, tileSize);
-                    }
-                    ctx.restore();
+                    ctx.fillText(value.toString(), 0, 0, tileSize);
+                    ctx.restore();        
                 }
             }
         }
         ctx.restore();
+        
+        // for (let i = 0; i < this._nextRenderTile; i += 1) {
+        //     const tile = this._renderTiles[i];
+        //     ctx.save();
+        //     ctx.fillStyle = 'red';
+        //     ctx.beginPath();
+        //     ctx.translate((tile.x * tileSize) + halfTile, (tile.y * tileSize) + halfTile);
+        //     ctx.translate(tile.translation * (tile.translateX * tileSize), tile.translation * (tile.translateY * tileSize));
+        //     ctx.scale(tile.scale, tile.scale);
+        //     ctx.rect(-halfTile, -halfTile, tileSize, tileSize);
+        //     ctx.fill();
+        //     ctx.stroke();
+        //     ctx.beginPath();
+        //     ctx.fillStyle = 'black';
+        //     ctx.fillText(tile.value.toString(), 0, 0, tileSize);
+        //     ctx.restore();
+        // }
+        // ctx.restore();
     }
 
     handleInput(event: KeyboardEvent) {
