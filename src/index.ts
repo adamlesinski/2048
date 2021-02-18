@@ -4,7 +4,7 @@ window.onload = () => {
     game.invalidate();
 };
 
-const DEBUG_ANIMATION_MULTIPLIER = 10;
+const DEBUG_ANIMATION_MULTIPLIER = 1;
 
 class AbstractGame {
     private _ctx: CanvasRenderingContext2D;
@@ -61,13 +61,18 @@ function newArray<T>(size: number, init: () => T): T[] {
     return array;
 }
 
+type Direction = 'left' | 'up' | 'right' | 'down';
+type Delta = -1 | 0 | 1;
+
 class Grid<T> {
     rawData: T[];
+    _line: T[];
     readonly size: number;
 
     constructor(size: number, init: () => T) {
         this.size = size;
         this.rawData = newArray(size * size, init);
+        this._line = new Array(size);
     }
 
     get(x: number, y: number): T {
@@ -93,43 +98,62 @@ class Grid<T> {
         return false;
     }
 
-    transpose() {
-        for (let y = 0; y <= this.size; y += 1) {
-            for (let x = y; x < this.size; x += 1) {
-                const tmp = this.get(x, y);
-                this.set(x, y, this.get(y, x));
-                this.set(y, x, tmp);
+    forEachLine(direction: Direction, f: (t: T[], x: number, y: number, dx: Delta, dy: Delta) => boolean): boolean {
+        let moved = false;
+        switch (direction) {
+            case 'left': {
+                for (let y = 0; y < this.size; y += 1) {
+                    for (let x = 0; x < this.size; x += 1) {
+                        this._line[x] = this.get(x, y);
+                    }
+                    moved = f(this._line, 0, y, 1, 0) || moved;
+                    for (let x = 0; x < this.size; x += 1) {
+                        this.set(x, y, this._line[x]);
+                    }
+                }
+                break;
+            }
+            case 'up': {
+                for (let x = 0; x < this.size; x += 1) {
+                    for (let y = 0; y < this.size; y += 1) {
+                        this._line[y] = this.get(x, y);
+                    }
+                    moved = f(this._line, x, 0, 0, 1) || moved;
+                    for (let y = 0; y < this.size; y += 1) {
+                        this.set(x, y, this._line[y]);
+                    }
+                }
+                break;
+            }
+            case 'right': {
+                for (let y = 0; y < this.size; y += 1) {
+                    for (let x = 0; x < this.size; x += 1) {
+                        this._line[this.size - 1 - x] = this.get(x, y);
+                    }
+                    moved = f(this._line, this.size - 1, y, -1, 0) || moved;
+                    for (let x = 0; x < this.size; x += 1) {
+                        this.set(x, y, this._line[this.size - 1 - x]);
+                    }
+                }
+                break;
+            }
+            case 'down': {
+                for (let x = 0; x < this.size; x += 1) {
+                    for (let y = 0; y < this.size; y += 1) {
+                        this._line[this.size - 1 - y] = this.get(x, y);
+                    }
+                    moved = f(this._line, x, this.size - 1, 0, -1) || moved;
+                    for (let y = 0; y < this.size; y += 1) {
+                        this.set(x, y, this._line[this.size - 1 - y]);
+                    }
+                }
+                break;
             }
         }
-        return this;
-    }
-    
-    reverseColumns() {
-        const pivot = Math.floor(this.size * 0.5);
-        for (let x = 0; x < this.size; x += 1) {
-            for (let y = 0; y < pivot; y += 1) {
-                const tmp = this.get(x, y);
-                this.set(x, y, this.get(x, this.size - y - 1));
-                this.set(x, this.size - y - 1, tmp);
-            }
-        }
-        return this;
-    }
-    
-    reverseRows() {
-        const pivot = Math.floor(this.size * 0.5);
-        for (let y = 0; y < this.size; y += 1) {
-            for (let x = 0; x < pivot; x += 1) {
-                const tmp = this.get(x, y);
-                this.set(x, y, this.get(this.size - x - 1, y));
-                this.set(this.size - x - 1, y, tmp);
-            }
-        }
-        return this;
+        return moved;
     }
 }
 
-type Direction = 'left' | 'up' | 'right' | 'down';
 
 function randomInt(min: number, max_exclusive: number) {
     return Math.floor(Math.random() * (max_exclusive - min)) + min;
@@ -151,7 +175,7 @@ function easeInOutBack(x: number): number {
       : (Math.pow(2 * x - 2, 2) * ((c2 + 1) * (x * 2 - 2) + c2) + 2) / 2;
 }
 
-type AnimationKind = 'none' | 'pulse' | 'slide' | 'slideAndMultiply' | 'disappear';
+type AnimationKind = 'none' | 'pulse' | 'slide' | 'slideAndMultiply' | 'slideAndDisappear' | 'disappear';
 
 const animations = {
     'pulse': (tile: Tile, t: number) => tile.scale = 0.5 + (easeInOutBack(t) * 0.5),
@@ -160,6 +184,12 @@ const animations = {
         tile.translation = 1.0 - easeOutBack(t);
         if (t >= 0.5) {
             tile.overlayValue = null;
+        }
+    },
+    'slideAndDisappear': (tile: Tile, t: number) => {
+        tile.translation = 1.0 - easeOutBack(t);
+        if (t === 1.0) {
+            tile.visible = false;
         }
     },
     'disappear': (tile: Tile, t: number) => tile.visible = t === 1.0 ? false : true,
@@ -191,34 +221,24 @@ class Tile {
         this.animation = 'none';
     }
 
-    animateSlide(now: number, direction: Direction, amount: number) {
+    animateSlide(now: number, dx: number, dy: number) {
         this.cancelPreviousAnimation();
         this.animation = 'slide';
         this.animationStart = now;
         this.animationDuration = 300 * DEBUG_ANIMATION_MULTIPLIER;
-        this.translateX = this.translateY = 0;
+        this.translateX = dx;
+        this.translateY = dy;
         this.translation = 1.0;
-        switch (direction) {
-            case 'left': this.translateX = amount; break;
-            case 'up': this.translateY = amount; break;
-            case 'right': this.translateX = -amount; break;
-            case 'down': this.translateY = -amount; break;
-        }
     }
 
-    animateSlideAndMultiply(now: number, direction: Direction, amount: number, value: number) {
+    animateSlideAndMultiply(now: number, dx: number, dy: number, value: number) {
         this.cancelPreviousAnimation();
         this.animation = 'slideAndMultiply';
         this.animationStart = now;
         this.animationDuration = 300 * DEBUG_ANIMATION_MULTIPLIER;
-        this.translateX = this.translateY = 0;
+        this.translateX = dx;
+        this.translateY = dy;
         this.translation = 1.0;
-        switch (direction) {
-            case 'left': this.translateX = amount; break;
-            case 'up': this.translateY = amount; break;
-            case 'right': this.translateX = -amount; break;
-            case 'down': this.translateY = -amount; break;
-        }
         this.overlayValue = value;
     }
 
@@ -237,86 +257,123 @@ class Tile {
         this.animationDuration = 300 * DEBUG_ANIMATION_MULTIPLIER;
         this.visible = true;
     }
+
+    animateSlideAndDisappear(now: number, dx: number, dy: number) {
+        this.cancelPreviousAnimation();
+        this.animation = 'slideAndDisappear';
+        this.animationStart = now;
+        this.animationDuration = 300 * DEBUG_ANIMATION_MULTIPLIER;
+        this.translateX = dx;
+        this.translateY = dy;
+        this.translation = 1.0;
+        this.visible = true;
+    }
 }
-
-const transforms = {
-    'left': (grid: Grid<any>) => grid.transpose().reverseRows(),
-    'up': (grid: Grid<any>) => {},
-    'right': (grid: Grid<any>) => grid.transpose().reverseColumns(),
-    'down': (grid: Grid<any>) => grid.reverseRows().reverseColumns(),
-};
-
-const inverseTransforms = {
-    'left': transforms['right'],
-    'up': transforms['up'],
-    'right': transforms['left'],
-    'down': transforms['down'],
-};
 
 class Game extends AbstractGame {
     private _grid: Grid<number>;
     private _gameOver: boolean = false;
+    private _renderTiles: Tile[];
+    private _nextRenderTile: number = 0;
 
     constructor(canvasSelector: string, gridSize: number) {
         super(canvasSelector);
         this._grid = new Grid(gridSize, () => 0);
-
+        this._renderTiles = newArray(gridSize * gridSize * 2, () => new Tile());
+        this.moveColumn = this.moveColumn.bind(this);
         this.dropTile(2);
         this.dropTile(2);
     }
 
     move(direction: Direction) {
-        const grid = this._grid;
-        let moves = false;
-
-        // Rotate the grid so that we are always performing the
-        // move upwards.
-        transforms[direction](grid);
-        for (let x = 0; x < grid.size; x += 1) {
-            let lastTileY = 0;
-            let currentTileY = lastTileY + 1;
-            while (currentTileY < grid.size) {
-                const currentTile = grid.get(x, currentTileY);
-                const lastTile = grid.get(x, lastTileY);
-                if (currentTile > 0) {
-                    if (lastTile === 0) {
-                        // Slide into empty
-                        grid.set(x, lastTileY, currentTile);
-                        grid.set(x, currentTileY, 0);
-
-                        currentTileY += 1;
-                        moves = true;
-                    } else if (lastTile === currentTile) {
-                        // Multiply
-                        grid.set(x, lastTileY, lastTile * 2);
-                        grid.set(x, currentTileY, 0);
-                        
-                        currentTileY += 1;
-                        lastTileY += 1;
-                        moves = true;
-                    } else {
-                        // Immoveable
-                        lastTileY += 1;
-                        if (lastTileY === currentTileY) {
-                            currentTileY += 1;
-                        }
-                    }
-                } else {
-                    // Empty
-                    currentTileY += 1;
-                }
-            }
-        }
-
-        // Rotate the grid back to its original orientation.
-        inverseTransforms[direction](grid);
-
-        if (moves) {
+        this._nextRenderTile = 0;
+        const moved = this._grid.forEachLine(direction, this.moveColumn);
+        if (moved) {
             this.dropTile(2);
-        } else if (!grid.contains(tile => tile === 0)) {
+        } else if (!this._grid.contains(tile => tile === 0)) {
             this._gameOver = true;
         }
         this.invalidate();
+    }
+
+    moveColumn(column: number[], originX: number, originY: number, dx: Delta, dy: Delta): boolean {
+        const now = performance.now();
+        let moved = false;
+        let wall = 0;
+        while (true) {
+            // Find the first non-zero tile.
+            let first = wall;
+            while (first < column.length && column[first] === 0) {
+                first += 1;
+            }
+            if (first === column.length) {
+                // No tiles remaining in this column.
+                return moved;
+            }
+
+            // Find the second non-zero tile.
+            let second = first + 1;
+            while (second < column.length && column[second] === 0) {
+                second += 1;
+            }
+            if (second === column.length) {
+                // Only the first tile was found. Slide it to the wall if not already there.
+                const tile = this.newRenderTile(originX + (wall * dx), originY + (wall * dy));
+                tile.value = column[first];
+                if (first !== wall) {
+                    column[wall] = column[first];
+                    column[first] = 0;
+                    tile.animateSlide(now, (first - wall) * dx, (first - wall) * dy);
+                    return true;
+                }
+                return moved;
+            }
+
+            if (column[first] === column[second]) {
+                // Two tiles match, slide them both to the wall and merge.
+                const bottomTile = this.newRenderTile(originX + (wall * dx), originY + (wall * dy));
+                bottomTile.value = column[first];
+                column[wall] = column[first] * 2;
+                if (wall !== first) {
+                    column[first] = 0;
+                    bottomTile.animateSlideAndDisappear(now, (first - wall) * dx, (first - wall) * dy);
+                } else {
+                    bottomTile.animateDisappear(now);
+                }
+                
+                const topTile = this.newRenderTile(originX + (wall * dx), originY + (wall * dy));
+                topTile.value = column[wall];
+                topTile.animateSlideAndMultiply(now, (second - wall) * dx, (second - wall) * dy, column[second]);
+                column[second] = 0;
+                moved = true;
+            } else {
+                // No match. Slide the first tile anyways.
+                const tile = this.newRenderTile(originX + (wall * dx), originY + (wall * dy));
+                tile.value = column[first];
+                if (first !== wall) {
+                    column[wall] = column[first];
+                    column[first] = 0;
+                    tile.animateSlide(now, (first - wall) * dx, (first - wall) * dy);
+                    moved = true;
+                }
+            }
+
+            // Move the virtual wall to just after the last slid tile.
+            wall += 1;
+        }
+    }
+
+    newRenderTile(x: number, y: number): Tile {
+        const tile = this._renderTiles[this._nextRenderTile];
+        this._nextRenderTile += 1;
+        tile.x = x;
+        tile.y = y;
+        tile.animation = 'none';
+        tile.scale = 1.0;
+        tile.translation = 0.0;
+        tile.visible = true;
+        tile.overlayValue = null;
+        return tile;
     }
 
     dropTile(value: number) {
@@ -327,11 +384,36 @@ class Game extends AbstractGame {
             const idx = (i + start) % rawData.length;
             if (rawData[idx] === 0) {
                 rawData[idx] = value;
+                const tile = this.newRenderTile(idx % this._grid.size, Math.floor(idx / this._grid.size));
+                tile.value = value;
+                tile.animatePulse(performance.now());
                 this.invalidate();
                 return true;
             }
         }
         return false;
+    }
+
+    tick(time: number) {
+        let requestFrame = false;
+        for (let i = 0; i < this._nextRenderTile; i += 1) {
+            const tile = this._renderTiles[i];
+            if (tile.animation === 'none') {
+                continue;
+            }
+            
+            const elapsed = time - tile.animationStart;
+            const progress = Math.max(0.0, Math.min(1.0, elapsed / tile.animationDuration));
+            animations[tile.animation](tile, progress);
+            if (progress === 1.0) {
+                tile.animation = 'none';
+            } else {
+                requestFrame = true;
+            }
+        }
+        if (requestFrame) {
+            this.invalidate();
+        }
     }
 
     render(ctx: CanvasRenderingContext2D) {
@@ -346,43 +428,29 @@ class Game extends AbstractGame {
         ctx.font = '78pt Verdana';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        for (let y = 0; y < this._grid.size; y += 1) {
-            for (let x = 0; x < this._grid.size; x += 1) {
-                const value = this._grid.get(x, y);
-                if (value > 0) {
-                    ctx.save();
-                    ctx.fillStyle = 'red';
-                    ctx.beginPath();
-                    ctx.translate((x * tileSize) + halfTile, (y * tileSize) + halfTile);
-                    ctx.rect(-halfTile, -halfTile, tileSize, tileSize);
-                    ctx.fill();
-                    ctx.stroke();
-                    ctx.beginPath();
-                    ctx.fillStyle = 'black';
-                    ctx.fillText(value.toString(), 0, 0, tileSize);
-                    ctx.restore();        
+        for (let i = 0; i < this._nextRenderTile; i += 1) {
+            const tile = this._renderTiles[i];
+            if (tile.visible) {
+                ctx.save();
+                ctx.fillStyle = 'red';
+                ctx.beginPath();
+                ctx.translate((tile.x * tileSize) + halfTile, (tile.y * tileSize) + halfTile);
+                ctx.translate(tile.translation * (tile.translateX * tileSize), tile.translation * (tile.translateY * tileSize));
+                ctx.scale(tile.scale, tile.scale);
+                ctx.rect(-halfTile, -halfTile, tileSize, tileSize);
+                ctx.fill();
+                ctx.stroke();
+                ctx.beginPath();
+                ctx.fillStyle = 'black';
+                if (tile.overlayValue !== null) {
+                    ctx.fillText(tile.overlayValue.toString(), 0, 0, tileSize);    
+                } else {
+                    ctx.fillText(tile.value.toString(), 0, 0, tileSize);
                 }
+                ctx.restore();
             }
         }
         ctx.restore();
-        
-        // for (let i = 0; i < this._nextRenderTile; i += 1) {
-        //     const tile = this._renderTiles[i];
-        //     ctx.save();
-        //     ctx.fillStyle = 'red';
-        //     ctx.beginPath();
-        //     ctx.translate((tile.x * tileSize) + halfTile, (tile.y * tileSize) + halfTile);
-        //     ctx.translate(tile.translation * (tile.translateX * tileSize), tile.translation * (tile.translateY * tileSize));
-        //     ctx.scale(tile.scale, tile.scale);
-        //     ctx.rect(-halfTile, -halfTile, tileSize, tileSize);
-        //     ctx.fill();
-        //     ctx.stroke();
-        //     ctx.beginPath();
-        //     ctx.fillStyle = 'black';
-        //     ctx.fillText(tile.value.toString(), 0, 0, tileSize);
-        //     ctx.restore();
-        // }
-        // ctx.restore();
     }
 
     handleInput(event: KeyboardEvent) {
