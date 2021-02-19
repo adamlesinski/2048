@@ -59,28 +59,17 @@ function newArray(size, init) {
 class Grid {
     constructor(size, init) {
         this.size = size;
-        this.rawData = newArray(size * size, init);
+        this.rawData = new Array(size * size).fill(init);
         this._line = new Array(size);
     }
     get(x, y) {
-        if (x < 0 || x >= this.size || y < 0 || y >= this.size) {
-            throw new Error(`Index out of bounds (${x}, ${y})`);
-        }
         return this.rawData[(y * this.size) + x];
     }
     set(x, y, value) {
-        if (x < 0 || x >= this.size || y < 0 || y >= this.size) {
-            throw new Error(`Index out of bounds (${x}, ${y})`);
-        }
         this.rawData[(y * this.size) + x] = value;
     }
-    contains(pred) {
-        for (const v of this.rawData) {
-            if (pred(v)) {
-                return true;
-            }
-        }
-        return false;
+    contains(needle) {
+        return this.rawData.indexOf(needle) !== -1;
     }
     forEachLine(direction, f) {
         let moved = false;
@@ -169,6 +158,23 @@ const animations = {
     },
     'disappear': (tile, t) => tile.visible = t === 1.0 ? false : true,
 };
+const COLORS = new Map([
+    [2, '#c5e7e2ff'],
+    [4, '#a1cda8ff'],
+    [8, '#627264ff'],
+    [16, '#c5e7e2ff'],
+    [32, '#ad9baaff'],
+    [64, '#8be8cbff'],
+    [128, '#7ea2aaff'],
+    [256, '#888da7ff'],
+    [512, '#9c7a97ff'],
+    [1024, '#da5552ff'],
+    [2048, '#df7373ff'],
+    [4096, '#a9e190ff'],
+    [8192, '#a5aa52ff'],
+    [16384, '#c589e8ff'],
+]);
+const OVERFLOW_COLOR = '#963d5aff';
 class Tile {
     constructor() {
         this.x = 0;
@@ -197,7 +203,7 @@ class Tile {
         this.cancelPreviousAnimation();
         this.animation = 'slide';
         this.animationStart = now;
-        this.animationDuration = 300 * DEBUG_ANIMATION_MULTIPLIER;
+        this.animationDuration = 100 * (Math.max(Math.abs(dx), Math.abs(dy))) * DEBUG_ANIMATION_MULTIPLIER;
         this.translateX = dx;
         this.translateY = dy;
         this.translation = 1.0;
@@ -206,7 +212,7 @@ class Tile {
         this.cancelPreviousAnimation();
         this.animation = 'slideAndMultiply';
         this.animationStart = now;
-        this.animationDuration = 300 * DEBUG_ANIMATION_MULTIPLIER;
+        this.animationDuration = 100 * (Math.max(Math.abs(dx), Math.abs(dy))) * DEBUG_ANIMATION_MULTIPLIER;
         this.translateX = dx;
         this.translateY = dy;
         this.translation = 1.0;
@@ -230,7 +236,7 @@ class Tile {
         this.cancelPreviousAnimation();
         this.animation = 'slideAndDisappear';
         this.animationStart = now;
-        this.animationDuration = 300 * DEBUG_ANIMATION_MULTIPLIER;
+        this.animationDuration = 100 * (Math.max(Math.abs(dx), Math.abs(dy))) * DEBUG_ANIMATION_MULTIPLIER;
         this.translateX = dx;
         this.translateY = dy;
         this.translation = 1.0;
@@ -242,9 +248,14 @@ class Game extends AbstractGame {
         super(canvasSelector);
         this._gameOver = false;
         this._nextRenderTile = 0;
-        this._grid = new Grid(gridSize, () => 0);
-        this._renderTiles = newArray(gridSize * gridSize * 2, () => new Tile());
         this.moveColumn = this.moveColumn.bind(this);
+        this._renderTiles = newArray(gridSize * gridSize * 2, () => new Tile());
+        this._grid = new Grid(gridSize, 0);
+        this.reset();
+    }
+    reset() {
+        this._grid.rawData.fill(0);
+        this._nextRenderTile = 0;
         this.dropTile(2);
         this.dropTile(2);
     }
@@ -254,8 +265,11 @@ class Game extends AbstractGame {
         if (moved) {
             this.dropTile(2);
         }
-        else if (!this._grid.contains(tile => tile === 0)) {
-            this._gameOver = true;
+        else if (!this._grid.contains(0)) {
+            if (!this._gameOver) {
+                this._gameOver = true;
+                document.querySelector('.game-over').classList.add('enabled');
+            }
         }
         this.invalidate();
     }
@@ -380,15 +394,16 @@ class Game extends AbstractGame {
         const halfTile = Math.floor(tileSize * 0.5);
         ctx.clearRect(0, 0, clientWidth, clientHeight);
         ctx.save();
-        ctx.strokeStyle = '1px solid black';
-        ctx.font = '78pt Verdana';
+        ctx.strokeStyle = '0.5px solid black';
+        ctx.font = `${halfTile}px Verdana`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         for (let i = 0; i < this._nextRenderTile; i += 1) {
             const tile = this._renderTiles[i];
+            const value = tile.overlayValue || tile.value;
             if (tile.visible) {
                 ctx.save();
-                ctx.fillStyle = 'red';
+                ctx.fillStyle = COLORS.get(value) || OVERFLOW_COLOR;
                 ctx.beginPath();
                 ctx.translate((tile.x * tileSize) + halfTile, (tile.y * tileSize) + halfTile);
                 ctx.translate(tile.translation * (tile.translateX * tileSize), tile.translation * (tile.translateY * tileSize));
@@ -398,12 +413,7 @@ class Game extends AbstractGame {
                 ctx.stroke();
                 ctx.beginPath();
                 ctx.fillStyle = 'black';
-                if (tile.overlayValue !== null) {
-                    ctx.fillText(tile.overlayValue.toString(), 0, 0, tileSize);
-                }
-                else {
-                    ctx.fillText(tile.value.toString(), 0, 0, tileSize);
-                }
+                ctx.fillText(value.toString(), 0, 0, tileSize);
                 ctx.restore();
             }
         }
@@ -430,6 +440,14 @@ class Game extends AbstractGame {
                 // Down
                 event.preventDefault();
                 this.move('down');
+                break;
+            case 32:
+                // Space
+                event.preventDefault();
+                if (this._gameOver) {
+                    this.reset();
+                    document.querySelector('.game-over').classList.remove('enabled');
+                }
                 break;
         }
     }
