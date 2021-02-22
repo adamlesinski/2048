@@ -302,8 +302,7 @@ class Game extends AbstractGame {
         const moved = this._grid.forEachLine(direction, this.moveColumn);
         if (moved) {
             this.dropTile(2);
-        } else if (!this._grid.contains(0)) {
-            if (!this._gameOver) {
+            if (!this._gameOver && this.checkGameOver()) {
                 this._gameOver = true;
                 document.querySelector('.game-over')!.classList.add('enabled');
             }
@@ -407,6 +406,21 @@ class Game extends AbstractGame {
             }
         }
         return false;
+    }
+
+    checkGameOver() {
+        const grid = this._grid;
+        for (let y = 0; y < grid.size; y += 1) {
+            for (let x = 0; x < grid.size; x += 1) {
+                const thisTile = grid.get(x, y);
+                if (thisTile === 0 
+                    || (x + 1 < grid.size && thisTile === grid.get(x + 1, y))
+                    || (y + 1 < grid.size && thisTile === grid.get(x, y + 1))) {
+                    return false;
+                }
+            }
+        }
+        return true;
     }
 
     tick(time: number) {
