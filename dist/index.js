@@ -258,13 +258,15 @@ class Game extends AbstractGame {
         this._nextRenderTile = 0;
         this.dropTile(2);
         this.dropTile(2);
+        this._updateHighScore();
     }
     move(direction) {
         this._nextRenderTile = 0;
         this._copyGrid();
         const moved = this._grid.forEachLine(direction, this.moveColumn);
         if (moved) {
-            this.dropTile(2);
+            this.dropTile(Math.random() < 0.9 ? 2 : 4);
+            this._updateHighScore();
             if (!this._gameOver && this.checkGameOver()) {
                 this._gameOver = true;
                 document.querySelector('.game-over').classList.add('enabled');
@@ -302,6 +304,17 @@ class Game extends AbstractGame {
         }
         this._canUndo = true;
         document.querySelectorAll('.undo').forEach((button) => button.removeAttribute('disabled'));
+    }
+    _updateHighScore() {
+        const thisHighScore = this._grid.rawData.reduce((max, v) => Math.max(max, v), 0);
+        const storedHighScore = parseInt(localStorage.getItem('highscore') || '0');
+        let highScore = storedHighScore;
+        if (thisHighScore > storedHighScore) {
+            localStorage.setItem('highscore', thisHighScore.toString());
+            highScore = thisHighScore;
+        }
+        document.querySelector('#highscore').textContent = highScore.toString();
+        return highScore;
     }
     moveColumn(column, originX, originY, dx, dy) {
         const now = performance.now();

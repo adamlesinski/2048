@@ -45,6 +45,10 @@ h1 {
     color: var(--fg-color);
 }
 
+p {
+    color: var(--fg-color);
+}
+
 canvas {
     grid-area: canvas;
     width: 100%;
@@ -114,6 +118,10 @@ canvas {
     margin: 0;
 }
 
+#highscore {
+    font-weight: bold;
+}
+
 @media (prefers-color-scheme: dark) {
     :root {
         --bg-color: #2e282a;
@@ -130,6 +138,7 @@ canvas {
         <div class="instructions">
             <p><img class="up-arrow"src="arrow.svg" width="15" height="15"/></p>
             <p><img class="left-arrow" src="arrow.svg" width="15" height="15" /> <img class="down-arrow"src="arrow.svg" width="15" height="15"/> <img class="right-arrow"src="arrow.svg" width="15" height="15"/></p>
+            <p>High score: <span id="highscore">-</span></p>
             <button class="undo" disabled>Undo</button>
         </div>
         <canvas id="canvas"></canvas>
