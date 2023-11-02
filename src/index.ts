@@ -279,6 +279,7 @@ class Tile {
 class Game extends AbstractGame {
     private _grid: Grid<number>;
     private _previousGrid: Grid<number>;
+    private _tempGrid: Grid<number>;
     private _gameOver: boolean = false;
     private _canUndo: boolean = false;
     private _renderTiles: Tile[];
@@ -290,8 +291,9 @@ class Game extends AbstractGame {
         this._renderTiles = newArray(gridSize * gridSize * 2, () => new Tile());
         this._grid = new Grid(gridSize, 0);
         this._previousGrid = new Grid(gridSize, 0);
+        this._tempGrid = new Grid(gridSize, 0);
         this.reset();
-        document.querySelectorAll(undoButtonSelector).forEach((button) => {
+        document.querySelectorAll<HTMLButtonElement>(undoButtonSelector).forEach((button) => {
             button.addEventListener('click', (_event) => this.undo());
         });
     }
@@ -310,6 +312,7 @@ class Game extends AbstractGame {
         this._copyGrid();
         const moved = this._grid.forEachLine(direction, this.moveColumn);
         if (moved) {
+            this._setupUndo();
             this.dropTile(Math.random() < 0.9 ? 2 : 4);
             this._updateHighScore();
             if (!this._gameOver && this.checkGameOver()) {
@@ -340,15 +343,23 @@ class Game extends AbstractGame {
                 }
             }
         }
-        document.querySelectorAll('.undo').forEach((button) => button.setAttribute('disabled', 'true'));
+        document.querySelectorAll<HTMLButtonElement>('.undo').forEach((button) => {
+            button.setAttribute('disabled', 'true');
+        });
         document.querySelector('.game-over')!.classList.remove('enabled');
         this.invalidate();
     }
 
     _copyGrid() {
         for (let i = 0; i < this._grid.rawData.length; i++) {
-            this._previousGrid.rawData[i] = this._grid.rawData[i];
+            this._tempGrid.rawData[i] = this._grid.rawData[i];
         }
+    }
+
+    _setupUndo() {
+        const tmp = this._previousGrid;
+        this._previousGrid = this._tempGrid;
+        this._tempGrid = tmp;
         this._canUndo = true;
         document.querySelectorAll('.undo').forEach((button) => button.removeAttribute('disabled'));
     }
