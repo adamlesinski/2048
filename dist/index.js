@@ -1,7 +1,7 @@
 "use strict";
 var game;
 window.onload = () => {
-    game = new Game('#canvas', 4);
+    game = new Game('#canvas', '.undo', 4);
     game.invalidate();
 };
 const DEBUG_ANIMATION_MULTIPLIER = 1;
@@ -238,23 +238,30 @@ class Tile {
     }
 }
 class Game extends AbstractGame {
-    constructor(canvasSelector, gridSize) {
+    constructor(canvasSelector, undoButtonSelector, gridSize) {
         super(canvasSelector);
         this._gameOver = false;
+        this._canUndo = false;
         this._nextRenderTile = 0;
         this.moveColumn = this.moveColumn.bind(this);
         this._renderTiles = newArray(gridSize * gridSize * 2, () => new Tile());
         this._grid = new Grid(gridSize, 0);
+        this._previousGrid = new Grid(gridSize, 0);
         this.reset();
+        document.querySelectorAll(undoButtonSelector).forEach((button) => {
+            button.addEventListener('click', (_event) => this.undo());
+        });
     }
     reset() {
         this._grid.rawData.fill(0);
+        this._canUndo = false;
         this._nextRenderTile = 0;
         this.dropTile(2);
         this.dropTile(2);
     }
     move(direction) {
         this._nextRenderTile = 0;
+        this._copyGrid();
         const moved = this._grid.forEachLine(direction, this.moveColumn);
         if (moved) {
             this.dropTile(2);
@@ -264,6 +271,37 @@ class Game extends AbstractGame {
             }
         }
         this.invalidate();
+    }
+    undo() {
+        if (!this._canUndo) {
+            return;
+        }
+        for (let i = 0; i < this._grid.rawData.length; i++) {
+            this._grid.rawData[i] = this._previousGrid.rawData[i];
+        }
+        this._canUndo = false;
+        this._nextRenderTile = 0;
+        const now = performance.now();
+        for (let y = 0; y < this._grid.size; y++) {
+            for (let x = 0; x < this._grid.size; x++) {
+                const value = this._grid.get(x, y);
+                if (value > 0) {
+                    const tile = this.newRenderTile(x, y);
+                    tile.value = value;
+                    tile.animatePulse(now);
+                }
+            }
+        }
+        document.querySelectorAll('.undo').forEach((button) => button.setAttribute('disabled', 'true'));
+        document.querySelector('.game-over').classList.remove('enabled');
+        this.invalidate();
+    }
+    _copyGrid() {
+        for (let i = 0; i < this._grid.rawData.length; i++) {
+            this._previousGrid.rawData[i] = this._grid.rawData[i];
+        }
+        this._canUndo = true;
+        document.querySelectorAll('.undo').forEach((button) => button.removeAttribute('disabled'));
     }
     moveColumn(column, originX, originY, dx, dy) {
         const now = performance.now();
