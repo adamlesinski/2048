@@ -293,9 +293,6 @@ class Game extends AbstractGame {
         this._previousGrid = new Grid(gridSize, 0);
         this._tempGrid = new Grid(gridSize, 0);
         this.reset();
-        document.querySelectorAll<HTMLButtonElement>(undoButtonSelector).forEach((button) => {
-            button.addEventListener('click', (_event) => this.undo());
-        });
     }
 
     reset() {
@@ -343,8 +340,8 @@ class Game extends AbstractGame {
                 }
             }
         }
-        document.querySelectorAll<HTMLButtonElement>('.undo').forEach((button) => {
-            button.setAttribute('disabled', 'true');
+        document.querySelectorAll('.undo').forEach((p) => {
+            p.classList.add('disabled');
         });
         document.querySelector('.game-over')!.classList.remove('enabled');
         this.invalidate();
@@ -361,7 +358,7 @@ class Game extends AbstractGame {
         this._previousGrid = this._tempGrid;
         this._tempGrid = tmp;
         this._canUndo = true;
-        document.querySelectorAll('.undo').forEach((button) => button.removeAttribute('disabled'));
+        document.querySelectorAll('.undo').forEach((p) => p.classList.remove('disabled'));
     }
 
     _updateHighScore() {
@@ -546,34 +543,39 @@ class Game extends AbstractGame {
     }
 
     handleInput(event: KeyboardEvent) {
-        switch (event.keyCode) {
-            case 37:
+        switch (event.key) {
+            case 'ArrowLeft':
                 // Left
                 event.preventDefault();
                 this.move('left');
                 break;
-            case 38:
+            case 'ArrowUp':
                 // Up
                 event.preventDefault();
                 this.move('up');
                 break;
-            case 39:
+            case 'ArrowRight':
                 // Right
                 event.preventDefault();
                 this.move('right');
                 break;
-            case 40:
+            case 'ArrowDown':
                 // Down
                 event.preventDefault();
                 this.move('down');
                 break;
-            case 32:
+            case ' ':
                 // Space
                 event.preventDefault();
                 if (this._gameOver) {
                     this.reset();
                     document.querySelector('.game-over')!.classList.remove('enabled');
                 }
+                break;
+            case 'u':
+                // Undo
+                event.preventDefault();
+                this.undo();
                 break;
         }
     }
